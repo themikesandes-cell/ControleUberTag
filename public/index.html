@@ -436,6 +436,7 @@ var ICON = {
   chart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M11 20V4M18 20v-7"/><path d="M3 20h18"/></svg>',
   more:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>',
   camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.2"/></svg>',
+  gallery:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><circle cx="8.3" cy="9.3" r="1.6"/><path d="M4.5 16.5l4.8-4.8a1.5 1.5 0 0 1 2.1 0l2.6 2.6"/><path d="M13 15l2.3-2.3a1.5 1.5 0 0 1 2.1 0l2.1 2.1"/></svg>',
   file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 3.5h7l4 4V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M14 3.5V8h4"/></svg>',
   trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 .8 12a1 1 0 0 0 1 .9h6.4a1 1 0 0 0 1-.9L18 7"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6"/></svg>',
@@ -526,6 +527,7 @@ var GET = function(p){ return api('GET', p); };
 var POST = function(p,b){ return api('POST', p, b); };
 var PATCH = function(p,b){ return api('PATCH', p, b); };
 var PUT = function(p,b){ return api('PUT', p, b); };
+var DEL = function(p){ return api('DELETE', p); };
 
 /* ---------------- boot ---------------- */
 async function boot(){
@@ -613,6 +615,10 @@ async function createCliente(data){
 }
 async function updateCliente(id, patch){
   await PATCH('/clientes/'+id, patch);
+  State.clientesCache = null;
+}
+async function deleteCliente(id){
+  await DEL('/clientes/'+id);
   State.clientesCache = null;
 }
 
@@ -715,7 +721,7 @@ async function fetchComprovanteBlobUrl(url){
 
 window.DATA = {
   boot:boot, login:login, bootstrapAdmin:bootstrapAdmin, logout:logout, trocarSenha:trocarSenha,
-  listClientes:listClientes, createCliente:createCliente, updateCliente:updateCliente,
+  listClientes:listClientes, createCliente:createCliente, updateCliente:updateCliente, deleteCliente:deleteCliente,
   listProjetos:listProjetos, createProjeto:createProjeto, updateProjeto:updateProjeto,
   listUsuarios:listUsuarios, addUsuario:addUsuario, updateUsuario:updateUsuario, resetarSenhaUsuario:resetarSenhaUsuario,
   resolveProfiles:resolveProfiles,
@@ -788,7 +794,12 @@ function openSheet(items){
   ov.addEventListener('mousedown', function(e){ if(e.target===ov) closeOverlays(); });
   ov.addEventListener('click', function(e){
     var t = e.target.closest('[data-sheet-nav]');
-    if(t){ closeOverlays(); navigate('#/'+t.getAttribute('data-sheet-nav')); }
+    if(!t) return;
+    var h = t.getAttribute('data-sheet-nav');
+    closeOverlays();
+    if(h==='__logout'){ confirmLogout(); }
+    else if(h==='__trocar-senha'){ openTrocarSenhaModal(); }
+    else { navigate('#/'+h); }
   });
   document.body.appendChild(ov);
 }
@@ -942,7 +953,7 @@ function renderSidebar(activeHash){
 function renderTopbar(){
   return '<div class="topbar"><div class="brand"><div class="brand-mark" style="width:28px;height:28px;font-size:12px;border-radius:7px;">CV</div>'+
     '<div class="brand-name" style="font-size:14px;">Controle de Visitas</div></div>'+
-    avatarHtml(S.me,28)+
+    '<button data-account-menu="1" style="border:none;background:none;padding:0;cursor:pointer;border-radius:50%;">'+avatarHtml(S.me,28)+'</button>'+
     '</div>';
 }
 function renderBottomNav(activeHash){
@@ -984,6 +995,36 @@ function moreSheetItems(){
     {hash:'nova-visita', label:'Nova visita (minha)', icon:'plus'},
     {hash:'minhas-visitas', label:'Minhas visitas', icon:'car'}
   ];
+}
+
+function confirmLogout(){
+  confirmDialog({
+    title:'Sair deste dispositivo?',
+    sub:'Você vai precisar do seu e-mail e senha para entrar de novo aqui.',
+    confirmLabel:'Sair',
+    danger:true,
+    onConfirm: function(){ closeOverlays(); D.logout(); }
+  });
+}
+function openTrocarSenhaModal(){
+  openModal(
+    '<h3>Trocar senha</h3>'+
+    '<div class="field"><label>Senha atual</label><input type="password" id="ts-atual"></div>'+
+    '<div class="field" style="margin-bottom:0;"><label>Nova senha</label><input type="password" id="ts-nova" placeholder="Pelo menos 6 caracteres"></div>'+
+    '<div class="modal-actions"><button class="btn btn-secondary" data-act="cancel">Cancelar</button><button class="btn btn-primary" data-act="save">Salvar</button></div>',
+    function(ov){
+      ov.querySelector('[data-act="cancel"]').onclick = closeOverlays;
+      ov.querySelector('[data-act="save"]').onclick = async function(){
+        var saveBtn = ov.querySelector('[data-act="save"]');
+        var atual = ov.querySelector('#ts-atual').value;
+        var nova = ov.querySelector('#ts-nova').value;
+        if(!nova || nova.length<6){ toast('A nova senha deve ter pelo menos 6 caracteres.', true); return; }
+        saveBtn.disabled = true;
+        try{ await D.trocarSenha(atual, nova); closeOverlays(); toast('Senha alterada.'); }
+        catch(e){ toast(e.message||String(e), true); saveBtn.disabled=false; }
+      };
+    }
+  );
 }
 
 function skeletonBlock(){
@@ -1094,35 +1135,15 @@ async function renderApp(){
   var moreBtn = root.querySelector('[data-more]');
   if(moreBtn) moreBtn.onclick = function(){ openSheet(moreSheetItems()); };
   var logoutBtn = root.querySelector('[data-logout]');
-  if(logoutBtn) logoutBtn.onclick = function(){
-    confirmDialog({
-      title:'Sair deste dispositivo?',
-      sub:'Você vai precisar do seu e-mail e senha para entrar de novo aqui.',
-      confirmLabel:'Sair',
-      danger:true,
-      onConfirm: function(){ closeOverlays(); D.logout(); }
-    });
-  };
+  if(logoutBtn) logoutBtn.onclick = confirmLogout;
   var trocarBtn = root.querySelector('[data-trocar-senha]');
-  if(trocarBtn) trocarBtn.onclick = function(){
-    openModal(
-      '<h3>Trocar senha</h3>'+
-      '<div class="field"><label>Senha atual</label><input type="password" id="ts-atual"></div>'+
-      '<div class="field" style="margin-bottom:0;"><label>Nova senha</label><input type="password" id="ts-nova" placeholder="Pelo menos 6 caracteres"></div>'+
-      '<div class="modal-actions"><button class="btn btn-secondary" data-act="cancel">Cancelar</button><button class="btn btn-primary" data-act="save">Salvar</button></div>',
-      function(ov){
-        ov.querySelector('[data-act="cancel"]').onclick = closeOverlays;
-        ov.querySelector('[data-act="save"]').onclick = async function(){
-          var saveBtn = ov.querySelector('[data-act="save"]');
-          var atual = ov.querySelector('#ts-atual').value;
-          var nova = ov.querySelector('#ts-nova').value;
-          if(!nova || nova.length<6){ toast('A nova senha deve ter pelo menos 6 caracteres.', true); return; }
-          saveBtn.disabled = true;
-          try{ await D.trocarSenha(atual, nova); closeOverlays(); toast('Senha alterada.'); }
-          catch(e){ toast(e.message||String(e), true); saveBtn.disabled=false; }
-        };
-      }
-    );
+  if(trocarBtn) trocarBtn.onclick = openTrocarSenhaModal;
+  var accountBtn = root.querySelector('[data-account-menu]');
+  if(accountBtn) accountBtn.onclick = function(){
+    openSheet([
+      {hash:'__trocar-senha', label:'Trocar senha', icon:'edit'},
+      {hash:'__logout', label:'Sair', icon:'x'}
+    ]);
   };
 
   var content = document.getElementById('page-content');
@@ -1360,9 +1381,9 @@ function wizardExpenseStepHtml(key, title, data){
     '<div class="field"><label>Valor da corrida *</label><div class="input-money"><input type="number" inputmode="decimal" step="0.01" min="0" id="w-valor-'+key+'" placeholder="0,00" value="'+esc(data.valor)+'"></div></div>'+
     '<div class="field"><label>Comprovante *</label>'+
       (shown.att ? attachmentPreviewHtml(shown.att, key, shown.existing) :
-        '<div class="upload-box" data-upload="'+key+'">'+U.ICON.camera+
-          '<div class="u-title">Adicionar comprovante</div>'+
-          '<div class="u-sub">Tire uma foto ou escolha da galeria — JPG, PNG ou PDF</div>'+
+        '<div class="upload-box" data-upload="'+key+'">'+U.ICON.gallery+
+          '<div class="u-title">Escolher foto da galeria</div>'+
+          '<div class="u-sub">Toque aqui e selecione "Galeria" ou "Fotos" no menu — JPG, PNG ou PDF</div>'+
         '</div>')+
       '<input type="file" id="w-file-'+key+'" accept="image/*,application/pdf" style="display:none">'+
     '</div>'+
@@ -1834,8 +1855,9 @@ function renderClientesUI(container, clientes, projetos){
         var qtd = projetos.filter(function(p){ return p.clienteId===c.id; }).length;
         return '<tr><td>'+esc(c.nome)+'</td><td class="mono">'+esc(c.codigo||'—')+'</td><td>'+qtd+'</td>'+
           '<td>'+(c.ativo?'<span class="badge badge-ativo">Ativo</span>':'<span class="badge badge-inativo">Inativo</span>')+'</td>'+
-          '<td style="white-space:nowrap;text-align:right;"><button class="btn btn-ghost btn-sm" data-edit-cliente="'+c.id+'">'+U.ICON.edit+'</button> '+
-          '<button class="btn btn-ghost btn-sm" data-toggle-cliente="'+c.id+'">'+(c.ativo?U.ICON.trash:U.ICON.check)+'</button></td></tr>';
+          '<td style="white-space:nowrap;text-align:right;"><button class="btn btn-ghost btn-sm" data-edit-cliente="'+c.id+'" title="Editar">'+U.ICON.edit+'</button> '+
+          '<button class="btn btn-ghost btn-sm" data-toggle-cliente="'+c.id+'">'+(c.ativo?'Desativar':'Ativar')+'</button> '+
+          '<button class="btn btn-ghost btn-sm" data-delete-cliente="'+c.id+'" title="Excluir">'+U.ICON.trash+'</button></td></tr>';
       }).join('')+'</tbody></table></div>')+
     '</div>';
 
@@ -1859,6 +1881,21 @@ function renderClientesUI(container, clientes, projetos){
         danger: c.ativo,
         onConfirm: async function(){
           try{ await D.updateCliente(c.id, {ativo:!c.ativo}); SH.closeOverlays(); SH.toast('Cliente atualizado.'); pageAdminClientes(container); }
+          catch(e){ SH.toast(H.friendlyDbError(e), true); }
+        }
+      });
+    };
+  });
+  container.querySelectorAll('[data-delete-cliente]').forEach(function(btn){
+    btn.onclick = function(){
+      var c = clientes.find(function(x){ return x.id===btn.getAttribute('data-delete-cliente'); });
+      SH.confirmDialog({
+        title: 'Excluir "'+c.nome+'" permanentemente?',
+        sub: 'Essa ação não pode ser desfeita. Só é possível excluir clientes sem projetos ou visitas vinculados — se este cliente já tiver histórico, desative-o em vez de excluir.',
+        confirmLabel: 'Excluir permanentemente',
+        danger: true,
+        onConfirm: async function(){
+          try{ await D.deleteCliente(c.id); SH.closeOverlays(); SH.toast('Cliente excluído.'); pageAdminClientes(container); }
           catch(e){ SH.toast(H.friendlyDbError(e), true); }
         }
       });
