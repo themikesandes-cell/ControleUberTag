@@ -147,6 +147,7 @@ button{font-family:inherit;}
 @media (max-width: 900px){
   .sidebar{display:none;}
   .app-shell{display:block;}
+  .main{flex:none;width:100%;min-height:100vh;}
   .topbar{
     display:flex;align-items:center;justify-content:space-between;
     padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--line);
@@ -901,7 +902,7 @@ function navItemsFor(role){
 function renderSidebar(activeHash){
   var nav = navItemsFor(S.role);
   function link(it){
-    var active = activeHash===it.hash || activeHash.indexOf(it.hash+'/')===0;
+    var active = activeHash===it.hash || (it.hash!=='admin' && activeHash.indexOf(it.hash+'/')===0);
     return '<button class="nav-link'+(active?' active':'')+'" data-nav="'+it.hash+'">'+U.ICON[it.icon]+'<span>'+it.label+'</span></button>';
   }
   var html = '<div class="sidebar">'+
