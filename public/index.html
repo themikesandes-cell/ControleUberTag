@@ -146,8 +146,6 @@ button{font-family:inherit;}
 
 @media (max-width: 900px){
   .sidebar{display:none;}
-  .app-shell{display:block;}
-  .main{flex:none;width:100%;min-height:100vh;}
   .topbar{
     display:flex;align-items:center;justify-content:space-between;
     padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--line);
@@ -322,6 +320,29 @@ table.data-table{width:100%;border-collapse:collapse;font-size:13.5px;}
 <div id="root">
   <div class="center-screen"><div class="spinner"></div></div>
 </div>
+<script>
+(function(){
+  function showFatalError(msg){
+    try{
+      var box = document.createElement('div');
+      box.style.cssText = 'position:fixed;inset:0;background:#3A1918;color:#fff;padding:20px;font-family:monospace;font-size:13px;white-space:pre-wrap;z-index:999999;overflow:auto;line-height:1.5;';
+      box.textContent = 'ERRO CAPTURADO — tire um print desta tela inteira e envie:\n\n' + msg;
+      document.body.appendChild(box);
+    }catch(e){ /* nada mais a fazer */ }
+  }
+  window.addEventListener('error', function(e){
+    showFatalError('Mensagem: ' + (e.message||'desconhecida') +
+      '\nArquivo: ' + (e.filename||'?') +
+      '\nLinha: ' + (e.lineno||'?') + ' Coluna: ' + (e.colno||'?') +
+      (e.error && e.error.stack ? ('\n\nPilha:\n' + e.error.stack) : ''));
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var r = e.reason;
+    showFatalError('Erro assíncrono (Promise): ' + (r && r.message ? r.message : String(r)) +
+      (r && r.stack ? ('\n\nPilha:\n' + r.stack) : ''));
+  });
+})();
+</script>
 <script>
 /* ===================================================================
    Controle de Visitas & Uber — lógica da aplicação
@@ -915,7 +936,7 @@ function renderSidebar(activeHash){
     '<div><div class="who-name">'+U.esc(S.me.name||'Você')+'</div><div class="who-role">'+(S.role==='admin'?'Administrador(a)':'Colaborador(a)')+'</div></div></div>'+
     '<button class="nav-link" data-trocar-senha="1" style="margin-top:2px;">'+U.ICON.edit+'<span>Trocar senha</span></button>'+
     '<button class="nav-link" data-logout="1">'+U.ICON.x+'<span>Sair</span></button>'+
-    '</div>';
+    '</div></div>';
   return html;
 }
 function renderTopbar(){
