@@ -175,6 +175,9 @@ button{font-family:inherit;}
   cursor:pointer;transition:background .12s ease, border-color .12s ease, transform .04s ease;line-height:1.2;
   font-family:var(--font-body);
 }
+.btn svg{width:16px;height:16px;flex:none;}
+.badge svg{width:11px;height:11px;flex:none;}
+.wp-dot svg{width:14px;height:14px;flex:none;}
 .btn:active{transform:scale(.98);}
 .btn-primary{background:var(--brand);color:#fff;}
 .btn-primary:hover{background:#0c4a45;}
@@ -707,6 +710,10 @@ async function reprovarVisita(uid, id, motivo){
   await POST('/visitas/'+id+'/reprovar', {motivo:motivo});
   invalidateAdminCache();
 }
+async function marcarPagamento(uid, id, payload){
+  await POST('/visitas/'+id+'/pagamento', payload);
+  invalidateAdminCache();
+}
 
 /* ---------------- comprovantes (arquivo protegido, exige token) ---------------- */
 async function fetchComprovanteBlobUrl(url){
@@ -727,7 +734,7 @@ window.DATA = {
   resolveProfiles:resolveProfiles,
   getMinhasVisitas:getMinhasVisitas, getVisita:getVisita, criarVisita:criarVisita, atualizarVisita:atualizarVisita,
   getTodasVisitas:getTodasVisitas, invalidateAdminCache:invalidateAdminCache,
-  aprovarVisita:aprovarVisita, reprovarVisita:reprovarVisita,
+  aprovarVisita:aprovarVisita, reprovarVisita:reprovarVisita, marcarPagamento:marcarPagamento,
   fetchComprovanteBlobUrl:fetchComprovanteBlobUrl,
   getDownloadsCap:function(){ return null; }
 };
@@ -1192,10 +1199,16 @@ function visitRowHtml(v, extra){
   var metaParts = [U.fmtDate(v.dataVisita)];
   if(extra.colaboradorNome) metaParts.push(extra.colaboradorNome);
   if(v.projetoNome) metaParts.push(v.projetoNome);
+  var pagamentoBadge = '';
+  if(v.status==='aprovado'){
+    pagamentoBadge = v.pago ?
+      '<span class="badge badge-ativo" style="margin-left:6px;">Pago</span>' :
+      '<span class="badge badge-aguardando" style="margin-left:6px;">A pagar</span>';
+  }
   return '<div class="visit-row" data-open-visita="'+v.colaboradorId+'|'+v.id+'">'+
     '<div class="vr-main"><div class="vr-cliente">'+esc(v.clienteNome||'—')+'</div><div class="vr-meta">'+esc(metaParts.join(' · '))+'</div></div>'+
     '<div class="vr-total mono">R$ '+U.fmtBRL(v.total)+'</div>'+
-    SH.statusBadge(v.status)+
+    SH.statusBadge(v.status)+pagamentoBadge+
   '</div>';
 }
 function bindCommon(container){
@@ -1619,6 +1632,26 @@ async function pageVisitaDetalhe(container, parts){
       '</span></div>';
   }).join('');
 
+  var pagamentoHtml = '';
+  if(v.status==='aprovado'){
+    pagamentoHtml = '<div class="card" style="padding:20px 22px;margin-bottom:16px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">'+
+        '<div><h3 style="margin:0 0 4px;font-size:15px;">Pagamento</h3>'+
+          (v.pago ?
+            '<p class="text-soft" style="font-size:13px;margin:0;">Pago em '+U.fmtDateTime(v.pagoEm)+(v.pagoPorNome?' por '+esc(v.pagoPorNome):'')+'.</p>' :
+            '<p class="text-soft" style="font-size:13px;margin:0;">Aguardando pagamento pelo financeiro.</p>')+
+        '</div>'+
+        (v.pago ? '<span class="badge badge-aprovado">'+U.ICON.check+' Pago</span>' : '<span class="badge badge-aguardando">Aguardando pagamento</span>')+
+      '</div>'+
+      (v.pagamentoComprovanteUrl ? '<div style="margin-top:14px;"><button class="btn btn-secondary btn-sm" data-view-pagamento-comprovante="1">'+U.ICON.eye+' Ver comprovante de pagamento</button></div>' : '')+
+      (S.role==='admin' ? '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">'+
+        (v.pago ?
+          '<button class="btn btn-secondary btn-sm" data-act="desmarcar-pago">Desmarcar pagamento</button>' :
+          '<button class="btn btn-approve btn-sm" data-act="marcar-pago">'+U.ICON.check+' Marcar como pago</button>')+
+      '</div>' : '')+
+    '</div>';
+  }
+
   container.innerHTML =
     '<button class="btn btn-ghost btn-sm" data-nav-btn="'+backHash+'" style="margin-bottom:14px;">'+U.ICON.arrowLeft+' Voltar</button>'+
     '<div class="page-head"><div><h1>'+esc(v.clienteNome||'Visita')+'</h1><p>'+U.fmtDate(v.dataVisita)+(v.projetoNome?' · '+esc(v.projetoNome):'')+'</p></div>'+
@@ -1636,6 +1669,7 @@ async function pageVisitaDetalhe(container, parts){
     '</div>'+
     (v.status==='reprovado' ? '<div class="helper-banner" style="background:var(--vermelho-bg);border-color:var(--vermelho-line);color:var(--vermelho);"><strong>Motivo da reprovação:</strong> '+esc(v.motivoReprovacao||'Não informado')+'</div>' : '')+
     (v.status==='aprovado' ? '<p class="text-soft" style="font-size:13px;">Aprovada por '+esc(aprovadorNome)+' em '+U.fmtDateTime(v.aprovadoEm)+'.</p>' : '')+
+    pagamentoHtml+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+
       (S.role!=='admin' && uid===S.uid && v.status==='reprovado' ? '<button class="btn btn-primary" data-act="corrigir">'+U.ICON.edit+' Corrigir prestação</button>' : '')+
       (S.role==='admin' && v.status==='aguardando' ? '<button class="btn btn-approve" data-act="aprovar">'+U.ICON.check+' Aprovar</button><button class="btn btn-danger" data-act="reprovar">'+U.ICON.x+' Reprovar</button>' : '')+
@@ -1679,6 +1713,81 @@ async function pageVisitaDetalhe(container, parts){
       }
     });
   };
+  var viewPagBtn = container.querySelector('[data-view-pagamento-comprovante]');
+  if(viewPagBtn) viewPagBtn.onclick = function(){
+    SH.viewAttachmentLarge({url:v.pagamentoComprovanteUrl, name:v.pagamentoComprovanteNome, type:v.pagamentoComprovanteTipo});
+  };
+  var marcarPagoBtn = container.querySelector('[data-act="marcar-pago"]');
+  if(marcarPagoBtn) marcarPagoBtn.onclick = function(){
+    openMarcarPagoModal(uid, id, function(){ navigate('#/visita/'+uid+'/'+id); });
+  };
+  var desmarcarPagoBtn = container.querySelector('[data-act="desmarcar-pago"]');
+  if(desmarcarPagoBtn) desmarcarPagoBtn.onclick = function(){
+    SH.confirmDialog({
+      title:'Desmarcar pagamento?',
+      sub:'A prestação voltará a aparecer como aguardando pagamento para o(a) colaborador(a).',
+      confirmLabel:'Desmarcar',
+      danger:true,
+      onConfirm: async function(){
+        try{ await D.marcarPagamento(uid,id,{pago:false}); SH.closeOverlays(); SH.toast('Pagamento desmarcado.'); navigate('#/visita/'+uid+'/'+id); }
+        catch(e){ SH.toast(friendlyDbError(e), true); }
+      }
+    });
+  };
+}
+
+function openMarcarPagoModal(uid, id, onDone){
+  var state = {att:null};
+  function bodyHtml(){
+    var isImg = state.att && state.att.type && state.att.type.indexOf('image')===0;
+    return '<h3>Marcar como pago</h3>'+
+      '<p class="modal-sub">Opcionalmente anexe o comprovante do pagamento (transferência, PIX, etc).</p>'+
+      (state.att ?
+        '<div class="upload-preview" style="margin-bottom:16px;">'+
+          (isImg ? '<img src="'+state.att.dataUrl+'" alt="">' : '<div class="up-icon">'+U.ICON.file+'</div>')+
+          '<div class="up-info"><div class="up-name">'+esc(state.att.name)+'</div><div class="up-size">'+U.humanSize(state.att.size)+'</div></div>'+
+          '<button class="btn btn-ghost btn-sm" type="button" data-act="remove-att">'+U.ICON.trash+'</button>'+
+        '</div>' :
+        '<div class="upload-box" data-act="upload" style="margin-bottom:16px;">'+U.ICON.gallery+
+          '<div class="u-title">Anexar comprovante (opcional)</div>'+
+          '<div class="u-sub">Foto ou PDF do comprovante</div>'+
+        '</div>')+
+      '<input type="file" id="pg-file" accept="image/*,application/pdf" style="display:none">'+
+      '<div class="modal-actions"><button class="btn btn-secondary" data-act="cancel">Cancelar</button><button class="btn btn-approve" data-act="save">Marcar como pago</button></div>';
+  }
+  function mount(ov){
+    ov.querySelector('[data-act="cancel"]').onclick = SH.closeOverlays;
+    var uploadBox = ov.querySelector('[data-act="upload"]');
+    var fileInput = ov.querySelector('#pg-file');
+    if(uploadBox) uploadBox.onclick = function(){ fileInput.click(); };
+    if(fileInput) fileInput.onchange = async function(){
+      var f = fileInput.files[0];
+      if(!f) return;
+      try{ state.att = await SH.fileToAttachment(f); rerender(); }
+      catch(err){ SH.toast(err.message || 'Não foi possível processar o arquivo.', true); }
+    };
+    var rmBtn = ov.querySelector('[data-act="remove-att"]');
+    if(rmBtn) rmBtn.onclick = function(){ state.att = null; rerender(); };
+    var saveBtn = ov.querySelector('[data-act="save"]');
+    saveBtn.onclick = async function(){
+      saveBtn.disabled = true;
+      var payload = {pago:true};
+      if(state.att){ payload.comprovanteBase64 = state.att.base64; payload.comprovanteMime = state.att.type; payload.comprovanteNome = state.att.name; }
+      try{
+        await D.marcarPagamento(uid, id, payload);
+        SH.closeOverlays();
+        SH.toast('Prestação marcada como paga.');
+        onDone();
+      }catch(e){ SH.toast(friendlyDbError(e), true); saveBtn.disabled = false; }
+    };
+  }
+  function rerender(){
+    var ov = document.getElementById('active-modal');
+    if(!ov) return;
+    ov.querySelector('.modal').innerHTML = bodyHtml();
+    mount(ov);
+  }
+  SH.openModal(bodyHtml(), mount);
 }
 
 window.PAGES_HELPERS = {friendlyDbError:friendlyDbError, statCard:statCard, emptyState:emptyState, visitRowHtml:visitRowHtml,
@@ -1707,8 +1816,26 @@ async function pageAdminDashboard(container){
   var aprovadasMes = doMes.filter(function(v){ return v.status==='aprovado'; }).length;
   var reprovadasMes = doMes.filter(function(v){ return v.status==='reprovado'; }).length;
   var pendentes = all.filter(function(v){ return v.status==='aguardando'; }).sort(function(a,b){ return (a.dataVisita||'').localeCompare(b.dataVisita||''); });
-  var ids = Array.from(new Set(pendentes.map(function(v){ return v.colaboradorId; })));
+  var aguardandoPagamento = all.filter(function(v){ return v.status==='aprovado' && !v.pago; }).sort(function(a,b){ return (a.dataVisita||'').localeCompare(b.dataVisita||''); });
+  var ids = Array.from(new Set(pendentes.concat(aguardandoPagamento).map(function(v){ return v.colaboradorId; })));
   var profiles = await D.resolveProfiles(ids);
+
+  function tableSection(title, list, emptyTitle, emptyText){
+    return '<div class="card" style="margin-bottom:16px;">'+
+      '<div style="padding:16px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;">'+
+        '<h3 style="margin:0;font-size:15px;">'+title+'</h3>'+
+        (list.length ? '<button class="btn btn-ghost btn-sm" data-nav-btn="admin/visitas">Ver todas as visitas</button>' : '')+
+      '</div>'+
+      (list.length===0 ? H.emptyState('check', emptyTitle, emptyText, null, null) :
+        '<div class="table-wrap"><table class="data-table"><thead><tr><th>Data</th><th>Colaborador(a)</th><th>Cliente</th><th>Projeto</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>'+
+        list.map(function(v){
+          var nome = (profiles[v.colaboradorId] && profiles[v.colaboradorId].name) || '—';
+          return '<tr><td>'+U.fmtDate(v.dataVisita)+'</td><td>'+esc(nome)+'</td><td>'+esc(v.clienteNome||'—')+'</td><td>'+esc(v.projetoNome||'—')+'</td>'+
+            '<td class="mono">R$ '+U.fmtBRL(v.total)+'</td><td>'+SH.statusBadge(v.status)+'</td>'+
+            '<td><button class="btn btn-secondary btn-sm" data-open-visita="'+v.colaboradorId+'|'+v.id+'">Ver</button></td></tr>';
+        }).join('')+
+        '</tbody></table></div>');
+  }
 
   container.innerHTML =
     '<div class="page-head"><div><h1>Painel administrativo</h1><p>Visão geral de '+H.mesLabel(mk)+'</p></div></div>'+
@@ -1716,24 +1843,12 @@ async function pageAdminDashboard(container){
       H.statCard('Visitas no mês', doMes.length)+
       H.statCard('Total de gastos', 'R$ '+U.fmtBRL(totalGasto))+
       H.statCard('Pendentes', pendentes.length)+
+      H.statCard('Aguardando pagamento', aguardandoPagamento.length)+
       H.statCard('Aprovadas no mês', aprovadasMes)+
       H.statCard('Reprovadas no mês', reprovadasMes)+
     '</div>'+
-    '<div class="card">'+
-      '<div style="padding:16px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;">'+
-        '<h3 style="margin:0;font-size:15px;">Prestações pendentes de aprovação</h3>'+
-        (pendentes.length ? '<button class="btn btn-ghost btn-sm" data-nav-btn="admin/visitas">Ver todas as visitas</button>' : '')+
-      '</div>'+
-      (pendentes.length===0 ? H.emptyState('check','Tudo em dia','Não há prestações aguardando aprovação no momento.', null, null) :
-        '<div class="table-wrap"><table class="data-table"><thead><tr><th>Data</th><th>Colaborador(a)</th><th>Cliente</th><th>Projeto</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>'+
-        pendentes.map(function(v){
-          var nome = (profiles[v.colaboradorId] && profiles[v.colaboradorId].name) || '—';
-          return '<tr><td>'+U.fmtDate(v.dataVisita)+'</td><td>'+esc(nome)+'</td><td>'+esc(v.clienteNome||'—')+'</td><td>'+esc(v.projetoNome||'—')+'</td>'+
-            '<td class="mono">R$ '+U.fmtBRL(v.total)+'</td><td>'+SH.statusBadge(v.status)+'</td>'+
-            '<td><button class="btn btn-secondary btn-sm" data-open-visita="'+v.colaboradorId+'|'+v.id+'">Ver</button></td></tr>';
-        }).join('')+
-        '</tbody></table></div>')+
-    '</div>';
+    tableSection('Prestações pendentes de aprovação', pendentes, 'Tudo em dia', 'Não há prestações aguardando aprovação no momento.')+
+    tableSection('Aprovadas aguardando pagamento', aguardandoPagamento, 'Tudo pago', 'Não há prestações aprovadas aguardando pagamento.');
   H.bindCommon(container);
 }
 
