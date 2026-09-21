@@ -129,6 +129,18 @@ button{font-family:inherit;}
 .nav-group-label{font-size:11px;color:#6F958D;padding:10px 12px 4px;}
 .sidebar-foot{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,.10);}
 .who{display:flex;align-items:center;gap:9px;padding:8px 10px;}
+.bell-btn{position:relative;border:none;background:none;cursor:pointer;padding:6px;border-radius:8px;color:inherit;display:inline-flex;}
+.bell-btn:hover{background:rgba(255,255,255,.08);}
+.bell-btn.light:hover{background:var(--paper);}
+.bell-dot{position:absolute;top:2px;right:2px;min-width:15px;height:15px;padding:0 3px;border-radius:100px;background:var(--vermelho);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1;}
+.notif-item{display:flex;gap:10px;align-items:flex-start;padding:12px 4px;border-bottom:1px solid var(--line);cursor:pointer;text-align:left;}
+.notif-item:last-child{border-bottom:none;}
+.notif-item:hover{background:var(--paper);}
+.notif-item .n-dot{width:8px;height:8px;border-radius:50%;background:var(--brand);flex:none;margin-top:6px;}
+.notif-item.lida .n-dot{background:transparent;}
+.notif-item .n-msg{font-size:13.5px;line-height:1.4;}
+.notif-item.lida .n-msg{color:var(--ink-soft);}
+.notif-item .n-time{font-size:11.5px;color:var(--ink-faint);margin-top:3px;}
 .who img{width:30px;height:30px;border-radius:50%;flex:none;}
 .who-name{font-size:13px;color:#fff;font-weight:500;}
 .who-role{font-size:11.5px;color:#8FB3AC;}
@@ -443,6 +455,7 @@ var ICON = {
   file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 3.5h7l4 4V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M14 3.5V8h4"/></svg>',
   trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 .8 12a1 1 0 0 0 1 .9h6.4a1 1 0 0 0 1-.9L18 7"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5H4.5S6 14 6 10z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>',
   x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   chevronR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
   chevronL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
@@ -553,6 +566,7 @@ async function boot(){
       var me = await GET('/auth/me');
       applySession(me);
       State.access = 'ok';
+      if(window.ensureNotifPolling) window.ensureNotifPolling();
     }catch(e){
       clearToken();
       State.access = 'login';
@@ -575,6 +589,7 @@ async function login(email, senha){
     applySession(res.user);
     State.access = 'ok';
     State.loginError = '';
+    if(window.ensureNotifPolling) window.ensureNotifPolling();
   }catch(e){
     State.loginError = e.message || String(e);
   }
@@ -586,6 +601,7 @@ async function bootstrapAdmin(nome, email, senha){
     setToken(res.token);
     applySession(res.user);
     State.access = 'ok';
+    if(window.ensureNotifPolling) window.ensureNotifPolling();
     return true;
   }catch(e){
     State.setupError = e.message || String(e);
@@ -596,6 +612,7 @@ function logout(){
   clearToken();
   State.uid = null; State.role = null; State.access = 'login';
   State.usuariosCache = null; State.clientesCache = null; State.projetosCache = null; State.adminVisitasCache = null;
+  if(window.stopNotifPolling) window.stopNotifPolling();
   window.renderApp();
 }
 async function trocarSenha(senhaAtual, novaSenha){
@@ -714,6 +731,24 @@ async function marcarPagamento(uid, id, payload){
   await POST('/visitas/'+id+'/pagamento', payload);
   invalidateAdminCache();
 }
+async function desfazerAprovacao(uid, id){
+  await POST('/visitas/'+id+'/desfazer-aprovacao');
+  invalidateAdminCache();
+}
+
+/* ---------------- notificações ---------------- */
+async function getNotificacoes(){
+  return GET('/notificacoes');
+}
+async function getContagemNotificacoes(){
+  return GET('/notificacoes/contagem');
+}
+async function marcarNotificacaoLida(id){
+  return POST('/notificacoes/'+id+'/marcar-lida');
+}
+async function marcarTodasNotificacoesLidas(){
+  return POST('/notificacoes/marcar-todas-lidas');
+}
 
 /* ---------------- comprovantes (arquivo protegido, exige token) ---------------- */
 async function fetchComprovanteBlobUrl(url){
@@ -734,7 +769,9 @@ window.DATA = {
   resolveProfiles:resolveProfiles,
   getMinhasVisitas:getMinhasVisitas, getVisita:getVisita, criarVisita:criarVisita, atualizarVisita:atualizarVisita,
   getTodasVisitas:getTodasVisitas, invalidateAdminCache:invalidateAdminCache,
-  aprovarVisita:aprovarVisita, reprovarVisita:reprovarVisita, marcarPagamento:marcarPagamento,
+  aprovarVisita:aprovarVisita, reprovarVisita:reprovarVisita, marcarPagamento:marcarPagamento, desfazerAprovacao:desfazerAprovacao,
+  getNotificacoes:getNotificacoes, getContagemNotificacoes:getContagemNotificacoes,
+  marcarNotificacaoLida:marcarNotificacaoLida, marcarTodasNotificacoesLidas:marcarTodasNotificacoesLidas,
   fetchComprovanteBlobUrl:fetchComprovanteBlobUrl,
   getDownloadsCap:function(){ return null; }
 };
@@ -945,7 +982,10 @@ function renderSidebar(activeHash){
     return '<button class="nav-link'+(active?' active':'')+'" data-nav="'+it.hash+'">'+U.ICON[it.icon]+'<span>'+it.label+'</span></button>';
   }
   var html = '<div class="sidebar">'+
-    '<div class="brand"><div class="brand-mark">CV</div><div class="brand-name">Controle de Visitas<small>&amp; Uber</small></div></div>'+
+    '<div class="brand" style="justify-content:space-between;">'+
+      '<div style="display:flex;align-items:center;gap:10px;"><div class="brand-mark">CV</div><div class="brand-name">Controle de Visitas<small>&amp; Uber</small></div></div>'+
+      '<button class="bell-btn" data-notif-bell="1" style="color:#DCEDE9;">'+U.ICON.bell+'<span class="bell-dot notif-badge hide">0</span></button>'+
+    '</div>'+
     nav.main.map(link).join('');
   if(nav.personal.length){
     html += '<div class="nav-sep"></div><div class="nav-group-label">Minha área</div>'+nav.personal.map(link).join('');
@@ -960,7 +1000,10 @@ function renderSidebar(activeHash){
 function renderTopbar(){
   return '<div class="topbar"><div class="brand"><div class="brand-mark" style="width:28px;height:28px;font-size:12px;border-radius:7px;">CV</div>'+
     '<div class="brand-name" style="font-size:14px;">Controle de Visitas</div></div>'+
-    '<button data-account-menu="1" style="border:none;background:none;padding:0;cursor:pointer;border-radius:50%;">'+avatarHtml(S.me,28)+'</button>'+
+    '<div style="display:flex;align-items:center;gap:6px;">'+
+      '<button class="bell-btn light" data-notif-bell="1">'+U.ICON.bell+'<span class="bell-dot notif-badge hide">0</span></button>'+
+      '<button data-account-menu="1" style="border:none;background:none;padding:0;cursor:pointer;border-radius:50%;">'+avatarHtml(S.me,28)+'</button>'+
+    '</div>'+
     '</div>';
 }
 function renderBottomNav(activeHash){
@@ -1029,6 +1072,77 @@ function openTrocarSenhaModal(){
         saveBtn.disabled = true;
         try{ await D.trocarSenha(atual, nova); closeOverlays(); toast('Senha alterada.'); }
         catch(e){ toast(e.message||String(e), true); saveBtn.disabled=false; }
+      };
+    }
+  );
+}
+
+function timeAgo(iso){
+  if(!iso) return '';
+  var diffMs = Date.now() - new Date(iso).getTime();
+  var min = Math.floor(diffMs/60000);
+  if(min < 1) return 'agora mesmo';
+  if(min < 60) return 'há '+min+' min';
+  var h = Math.floor(min/60);
+  if(h < 24) return 'há '+h+'h';
+  var d = Math.floor(h/24);
+  if(d < 7) return 'há '+d+'d';
+  return U.fmtDate(iso.slice(0,10));
+}
+function updateNotifBadges(count){
+  document.querySelectorAll('.notif-badge').forEach(function(el){
+    if(count>0){ el.textContent = count>99?'99+':String(count); el.classList.remove('hide'); }
+    else { el.classList.add('hide'); }
+  });
+}
+var _notifPollTimer = null;
+window.ensureNotifPolling = function(){
+  if(_notifPollTimer) return;
+  var tick = async function(){
+    try{ var r = await D.getContagemNotificacoes(); updateNotifBadges(r.naoLidas||0); }
+    catch(e){ /* silencioso - a próxima tentativa cobre */ }
+  };
+  tick();
+  _notifPollTimer = setInterval(tick, 25000);
+};
+window.stopNotifPolling = function(){
+  if(_notifPollTimer){ clearInterval(_notifPollTimer); _notifPollTimer = null; }
+  updateNotifBadges(0);
+};
+async function openNotifPanel(){
+  var lista;
+  try{ lista = await D.getNotificacoes(); }
+  catch(e){ toast(e.message||'Não foi possível carregar as notificações.', true); return; }
+  function itemHtml(n){
+    return '<button class="notif-item'+(n.lida?' lida':'')+'" data-notif-id="'+n.id+'" data-notif-visita="'+(n.visitaColaboradorId||'')+'|'+(n.visitaId||'')+'">'+
+      '<span class="n-dot"></span>'+
+      '<span style="flex:1;"><span class="n-msg">'+U.esc(n.mensagem)+'</span><div class="n-time">'+timeAgo(n.criadoEm)+'</div></span>'+
+    '</button>';
+  }
+  openModal(
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+      '<h3 style="margin:0;">Notificações</h3>'+
+      (lista.some(function(n){return !n.lida;}) ? '<button class="btn btn-ghost btn-sm" data-act="marcar-todas">Marcar todas como lidas</button>' : '')+
+    '</div>'+
+    '<div style="max-height:60vh;overflow:auto;">'+
+      (lista.length ? lista.map(itemHtml).join('') : '<p class="text-faint" style="padding:20px 4px;text-align:center;">Nenhuma notificação por aqui ainda.</p>')+
+    '</div>',
+    function(ov){
+      ov.querySelectorAll('[data-notif-id]').forEach(function(btn){
+        btn.onclick = async function(){
+          var id = btn.getAttribute('data-notif-id');
+          var parts = btn.getAttribute('data-notif-visita').split('|');
+          var visitaUid = parts[0], visitaId = parts[1];
+          try{ await D.marcarNotificacaoLida(id); }catch(e){}
+          updateNotifBadges(Math.max(0, (document.querySelectorAll('.notif-item:not(.lida)').length-1)));
+          closeOverlays();
+          if(visitaId && visitaUid){ navigate('#/visita/'+visitaUid+'/'+visitaId); }
+        };
+      });
+      var marcarTodasBtn = ov.querySelector('[data-act="marcar-todas"]');
+      if(marcarTodasBtn) marcarTodasBtn.onclick = async function(){
+        try{ await D.marcarTodasNotificacoesLidas(); updateNotifBadges(0); closeOverlays(); }
+        catch(e){ toast(e.message||'Erro ao marcar como lidas.', true); }
       };
     }
   );
@@ -1152,6 +1266,9 @@ async function renderApp(){
       {hash:'__logout', label:'Sair', icon:'x'}
     ]);
   };
+  root.querySelectorAll('[data-notif-bell]').forEach(function(btn){
+    btn.onclick = openNotifPanel;
+  });
 
   var content = document.getElementById('page-content');
   content.innerHTML = skeletonBlock();
@@ -1355,16 +1472,12 @@ async function renderWizardStep(container){
 async function wizardStep1Html(){
   var w = S.wizard;
   var clientes = (await D.listClientes()).filter(function(c){ return c.ativo || c.id===w.clienteId; });
-  var projetosAll = await D.listProjetos();
-  var projetos = projetosAll.filter(function(p){ return p.clienteId===w.clienteId && (p.ativo || p.id===w.projetoId); });
   return (clientes.length===0 ?
       '<div class="helper-banner">Nenhum cliente cadastrado ainda. Peça a um administrador para cadastrar clientes em "Clientes" antes de registrar visitas.</div>' : '')+
     '<div class="field"><label>Cliente *</label><select id="w-cliente" '+(clientes.length===0?'disabled':'')+'>'+
       selectOptions(clientes,'id','nome',w.clienteId,'Selecione o cliente')+'</select></div>'+
     '<div class="field"><label>Data da visita *</label><input type="date" id="w-data" value="'+esc(w.dataVisita)+'" max="'+U.todayISO()+'"></div>'+
-    '<div class="field"><label>Projeto / Job</label><select id="w-projeto" '+(!w.clienteId?'disabled':'')+'>'+
-      selectOptions(projetos,'id','nome',w.projetoId,projetos.length?'Nenhum (opcional)':'Sem projetos para este cliente')+'</select></div>'+
-    '<div class="field"><label>Observação</label><textarea id="w-obs" placeholder="Opcional">'+esc(w.observacao)+'</textarea></div>'+
+    '<div class="field"><label>Observação *</label><textarea id="w-obs" placeholder="O que foi feito na visita?">'+esc(w.observacao)+'</textarea></div>'+
     '<div class="modal-actions" style="justify-content:space-between;">'+
       '<button class="btn btn-ghost" data-wiz="cancel">Cancelar</button>'+
       '<button class="btn btn-primary" data-wiz="next1">Continuar</button>'+
@@ -1439,27 +1552,22 @@ function bindWizardEvents(container){
   if(next1) next1.onclick = async function(){
     var clienteSel = container.querySelector('#w-cliente');
     var dataInp = container.querySelector('#w-data');
-    var projSel = container.querySelector('#w-projeto');
     var obsInp = container.querySelector('#w-obs');
     if(!clienteSel.value){ SH.toast('Selecione um cliente.', true); return; }
     if(!dataInp.value){ SH.toast('Informe a data da visita.', true); return; }
+    if(!obsInp.value.trim()){ SH.toast('Descreva o que foi feito na visita.', true); return; }
     w.clienteId = clienteSel.value;
     w.clienteNome = clienteSel.options[clienteSel.selectedIndex].text;
     w.dataVisita = dataInp.value;
-    w.projetoId = projSel.value || '';
-    w.projetoNome = projSel.value ? projSel.options[projSel.selectedIndex].text : '';
     w.observacao = obsInp.value.trim();
     w.step = 2;
     renderWizardStep(container);
   };
-  var clienteSelLive = container.querySelector('#w-cliente');
-  if(clienteSelLive) clienteSelLive.onchange = function(){
-    w.clienteId = clienteSelLive.value;
-    w.projetoId = ''; w.projetoNome = '';
-    renderWizardStep(container);
-  };
 
   ['ida','volta'].forEach(function(key){
+    var valInpLive = container.querySelector('#w-valor-'+key);
+    if(valInpLive) valInpLive.addEventListener('input', function(){ w[key].valor = valInpLive.value; });
+
     var uploadBox = container.querySelector('[data-upload="'+key+'"]');
     var fileInput = container.querySelector('#w-file-'+key);
     var handleFile = async function(){
@@ -1673,6 +1781,7 @@ async function pageVisitaDetalhe(container, parts){
     '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+
       (S.role!=='admin' && uid===S.uid && v.status==='reprovado' ? '<button class="btn btn-primary" data-act="corrigir">'+U.ICON.edit+' Corrigir prestação</button>' : '')+
       (S.role==='admin' && v.status==='aguardando' ? '<button class="btn btn-approve" data-act="aprovar">'+U.ICON.check+' Aprovar</button><button class="btn btn-danger" data-act="reprovar">'+U.ICON.x+' Reprovar</button>' : '')+
+      (S.role==='admin' && v.status==='aprovado' ? '<button class="btn btn-secondary" data-act="desfazer-aprovacao">Desfazer aprovação</button>' : '')+
     '</div>';
 
   bindCommon(container);
@@ -1730,6 +1839,19 @@ async function pageVisitaDetalhe(container, parts){
       danger:true,
       onConfirm: async function(){
         try{ await D.marcarPagamento(uid,id,{pago:false}); SH.closeOverlays(); SH.toast('Pagamento desmarcado.'); navigate('#/visita/'+uid+'/'+id); }
+        catch(e){ SH.toast(friendlyDbError(e), true); }
+      }
+    });
+  };
+  var desfazerBtn = container.querySelector('[data-act="desfazer-aprovacao"]');
+  if(desfazerBtn) desfazerBtn.onclick = function(){
+    SH.confirmDialog({
+      title:'Desfazer aprovação?',
+      sub:'A prestação volta para "aguardando aprovação" e o(a) colaborador(a) será avisado(a). Se já estava marcada como paga, o pagamento também será desfeito.',
+      confirmLabel:'Desfazer aprovação',
+      danger:true,
+      onConfirm: async function(){
+        try{ await D.desfazerAprovacao(uid,id); SH.closeOverlays(); SH.toast('Aprovação desfeita.'); navigate('#/visita/'+uid+'/'+id); }
         catch(e){ SH.toast(friendlyDbError(e), true); }
       }
     });
