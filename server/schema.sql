@@ -66,3 +66,12 @@ CREATE INDEX IF NOT EXISTS idx_visitas_status ON visitas(status);
 CREATE INDEX IF NOT EXISTS idx_visitas_data ON visitas(data_visita);
 CREATE INDEX IF NOT EXISTS idx_despesas_visita ON despesas(visita_id);
 CREATE INDEX IF NOT EXISTS idx_projetos_cliente ON projetos(cliente_id);
+
+-- Controle de pagamento (adicionado depois — ALTER idempotente, seguro rodar em banco já existente)
+ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pago BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pago_em TIMESTAMPTZ;
+ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pago_por UUID REFERENCES usuarios(id);
+ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_base64 TEXT;
+ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_mime TEXT;
+ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_nome TEXT;
+CREATE INDEX IF NOT EXISTS idx_visitas_pago ON visitas(pago);
