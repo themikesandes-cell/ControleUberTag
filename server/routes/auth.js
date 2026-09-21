@@ -1,76 +1,55 @@
-const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
-module.exports = function (pool, authLib) {
-  const router = express.Router();
-  const { hashSenha, checarSenha, emitirToken, authMiddleware } = authLib;
-  const requireAuth = authMiddleware(pool);
+// Em produção, defina JWT_SECRET nas variáveis de ambiente do Railway.
+// Sem isso, geramos um segredo aleatório ao iniciar — funciona, mas todo
+// mundo é deslogado sempre que o servidor reiniciar/reimplantar.
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn('AVISO: JWT_SECRET não definido. Defina essa variável de ambiente no Railway para sessões estáveis entre reinícios.');
+}
 
-  function publicUser(u) {
-    return { id: u.id, nome: u.nome, email: u.email, cargo: u.cargo, perfil: u.perfil, ativo: u.ativo };
-  }
+function hashSenha(senha) {
+  return bcrypt.hashSync(senha, 10);
+}
+function checarSenha(senha, hash) {
+  return bcrypt.compareSync(senha, hash);
+}
+function emitirToken(usuario) {
+  return jwt.sign({ id: usuario.id, perfil: usuario.perfil }, JWT_SECRET, { expiresIn: '30d' });
+}
+function verificarToken(token) {
+  return jwt.verify(token, JWT_SECRET);
+}
+function gerarSenhaTemporaria() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 10; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
 
-  // Existe pelo menos um usuário cadastrado?
-  router.get('/hasUsers', async (req, res) => {
-    const { rows } = await pool.query('SELECT COUNT(*)::int AS c FROM usuarios');
-    res.json({ hasUsers: rows[0].c > 0 });
-  });
-
-  // Cria o primeiro administrador (só funciona se não existir ninguém ainda)
-  router.post('/bootstrap', async (req, res) => {
+function authMiddleware(pool) {
+  return async function (req, res, next) {
     try {
-      const { rows: countRows } = await pool.query('SELECT COUNT(*)::int AS c FROM usuarios');
-      if (countRows[0].c > 0) return res.status(400).json({ error: 'Já existe um administrador configurado.' });
-      const { nome, email, senha } = req.body || {};
-      if (!nome || !email || !senha) return res.status(400).json({ error: 'Informe nome, e-mail e senha.' });
-      if (senha.length < 6) return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres.' });
-      const hash = hashSenha(senha);
-      const { rows } = await pool.query(
-        `INSERT INTO usuarios (nome, email, senha_hash, cargo, perfil, ativo)
-         VALUES ($1, $2, $3, 'Administrador(a)', 'admin', true) RETURNING *`,
-        [nome.trim(), email.trim().toLowerCase(), hash]
-      );
+      const header = req.headers.authorization || '';
+      const token = header.startsWith('Bearer ') ? header.slice(7) : (req.query && req.query.token) || null;
+      if (!token) return res.status(401).json({ error: 'Não autenticado.' });
+      const payload = verificarToken(token);
+      const { rows } = await pool.query('SELECT * FROM usuarios WHERE id = $1', [payload.id]);
       const user = rows[0];
-      res.json({ token: emitirToken(user), user: publicUser(user) });
-    } catch (e) {
-      if (e.code === '23505') return res.status(400).json({ error: 'Já existe uma conta com esse e-mail.' });
-      console.error(e);
-      res.status(500).json({ error: 'Erro ao criar administrador.' });
-    }
-  });
-
-  router.post('/login', async (req, res) => {
-    try {
-      const { email, senha } = req.body || {};
-      if (!email || !senha) return res.status(400).json({ error: 'Informe e-mail e senha.' });
-      const { rows } = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email.trim().toLowerCase()]);
-      const user = rows[0];
-      if (!user || !checarSenha(senha, user.senha_hash)) {
-        return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
-      }
+      if (!user) return res.status(401).json({ error: 'Usuário não encontrado.' });
       if (!user.ativo) return res.status(403).json({ error: 'Seu acesso foi desativado. Fale com um administrador.' });
-      res.json({ token: emitirToken(user), user: publicUser(user) });
+      req.user = user;
+      next();
     } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: 'Erro ao entrar.' });
+      return res.status(401).json({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
     }
-  });
+  };
+}
+function requireAdmin(req, res, next) {
+  if (req.user.perfil !== 'admin') return res.status(403).json({ error: 'Ação restrita a administradores.' });
+  next();
+}
 
-  router.get('/me', requireAuth, (req, res) => {
-    res.json(publicUser(req.user));
-  });
-
-  router.post('/trocar-senha', requireAuth, async (req, res) => {
-    try {
-      const { senhaAtual, novaSenha } = req.body || {};
-      if (!novaSenha || novaSenha.length < 6) return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres.' });
-      if (!checarSenha(senhaAtual || '', req.user.senha_hash)) return res.status(401).json({ error: 'Senha atual incorreta.' });
-      await pool.query('UPDATE usuarios SET senha_hash = $1 WHERE id = $2', [hashSenha(novaSenha), req.user.id]);
-      res.json({ ok: true });
-    } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: 'Erro ao trocar senha.' });
-    }
-  });
-
-  return { router, requireAuth };
-};
+module.exports = { hashSenha, checarSenha, emitirToken, verificarToken, gerarSenhaTemporaria, authMiddleware, requireAdmin };
