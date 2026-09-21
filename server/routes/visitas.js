@@ -3,6 +3,25 @@ const express = require('express');
 module.exports = function (pool, requireAuth, requireAdmin) {
   const router = express.Router();
 
+  async function getAdminIds() {
+    const { rows } = await pool.query("SELECT id FROM usuarios WHERE perfil = 'admin' AND ativo = true");
+    return rows.map((r) => r.id);
+  }
+  async function notificar(usuarioIds, tipo, visitaId, mensagem) {
+    for (const uid of usuarioIds) {
+      if (!uid) continue;
+      await pool.query(
+        'INSERT INTO notificacoes (usuario_id, tipo, visita_id, mensagem) VALUES ($1,$2,$3,$4)',
+        [uid, tipo, visitaId, mensagem]
+      );
+    }
+  }
+  async function getClienteNome(clienteId) {
+    if (!clienteId) return 'cliente';
+    const { rows } = await pool.query('SELECT nome FROM clientes WHERE id = $1', [clienteId]);
+    return rows[0] ? rows[0].nome : 'cliente';
+  }
+
   function visitaRowToJson(v) {
     return {
       id: v.id, colaboradorId: v.colaborador_id, colaboradorNome: v.colaborador_nome,
@@ -97,6 +116,8 @@ module.exports = function (pool, requireAuth, requireAdmin) {
       const id = rows[0].id;
       await salvarDespesas(client, id, p.despesas);
       await client.query('COMMIT');
+      const adminIds = await getAdminIds();
+      await notificar(adminIds, 'nova_visita', id, `${req.user.nome} enviou uma nova prestação (${p.clienteNome || 'cliente'}) para aprovação.`);
       res.json({ id });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -133,6 +154,8 @@ module.exports = function (pool, requireAuth, requireAdmin) {
       );
       await salvarDespesas(client, req.params.id, p.despesas, existingByTipo);
       await client.query('COMMIT');
+      const adminIds = await getAdminIds();
+      await notificar(adminIds, 'nova_visita', req.params.id, `${req.user.nome} reenviou uma prestação (${p.clienteNome || 'cliente'}) para aprovação.`);
       res.json({ ok: true });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -146,10 +169,13 @@ module.exports = function (pool, requireAuth, requireAdmin) {
   router.post('/:id/aprovar', requireAuth, requireAdmin, async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE visitas SET status='aprovado', aprovado_em=now(), aprovado_por=$1, motivo_reprovacao=''
-       WHERE id=$2 RETURNING id`,
+       WHERE id=$2 RETURNING id, colaborador_id, cliente_id`,
       [req.user.id, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Prestação não encontrada.' });
+    const v = rows[0];
+    const clienteNome = await getClienteNome(v.cliente_id);
+    await notificar([v.colaborador_id], 'aprovada', v.id, `Sua prestação de ${clienteNome} foi aprovada.`);
     res.json({ ok: true });
   });
 
@@ -158,10 +184,31 @@ module.exports = function (pool, requireAuth, requireAdmin) {
     if (!motivo) return res.status(400).json({ error: 'Informe o motivo da reprovação.' });
     const { rows } = await pool.query(
       `UPDATE visitas SET status='reprovado', aprovado_em=now(), aprovado_por=$1, motivo_reprovacao=$2
-       WHERE id=$3 RETURNING id`,
+       WHERE id=$3 RETURNING id, colaborador_id, cliente_id`,
       [req.user.id, motivo, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Prestação não encontrada.' });
+    const v = rows[0];
+    const clienteNome = await getClienteNome(v.cliente_id);
+    await notificar([v.colaborador_id], 'reprovada', v.id, `Sua prestação de ${clienteNome} foi reprovada: ${motivo}`);
+    res.json({ ok: true });
+  });
+
+  router.post('/:id/desfazer-aprovacao', requireAuth, requireAdmin, async (req, res) => {
+    const existing = await pool.query('SELECT status, colaborador_id, cliente_id FROM visitas WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Prestação não encontrada.' });
+    if (existing.rows[0].status !== 'aprovado') {
+      return res.status(400).json({ error: 'Esta prestação não está aprovada.' });
+    }
+    await pool.query(
+      `UPDATE visitas SET status='aguardando', aprovado_em=NULL, aprovado_por=NULL,
+       pago=false, pago_em=NULL, pago_por=NULL,
+       pagamento_comprovante_base64=NULL, pagamento_comprovante_mime=NULL, pagamento_comprovante_nome=NULL
+       WHERE id=$1`,
+      [req.params.id]
+    );
+    const clienteNome = await getClienteNome(existing.rows[0].cliente_id);
+    await notificar([existing.rows[0].colaborador_id], 'desaprovada', req.params.id, `A aprovação da sua prestação de ${clienteNome} foi desfeita e ela voltou para análise.`);
     res.json({ ok: true });
   });
 
