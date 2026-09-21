@@ -5,7 +5,7 @@ module.exports = function (pool, requireAuth, requireAdmin, authLib) {
   const { hashSenha, gerarSenhaTemporaria } = authLib;
 
   function publicUser(u) {
-    return { id: u.id, nome: u.nome, email: u.email, cargo: u.cargo, perfil: u.perfil, ativo: u.ativo, criadoEm: u.criado_em };
+    return { id: u.id, nome: u.nome, email: u.email, cargo: u.cargo, perfil: u.perfil, ativo: u.ativo, criadoEm: u.criado_em, temFoto: !!u.foto_mime };
   }
 
   router.get('/', requireAuth, requireAdmin, async (req, res) => {
@@ -61,6 +61,16 @@ module.exports = function (pool, requireAuth, requireAdmin, authLib) {
       console.error(e);
       res.status(500).json({ error: 'Erro ao resetar senha.' });
     }
+  });
+
+  router.get('/:id/foto', requireAuth, async (req, res) => {
+    const { rows } = await pool.query('SELECT foto_base64, foto_mime FROM usuarios WHERE id = $1', [req.params.id]);
+    const u = rows[0];
+    if (!u || !u.foto_base64) return res.status(404).send('Sem foto.');
+    const buf = Buffer.from(u.foto_base64, 'base64');
+    res.setHeader('Content-Type', u.foto_mime || 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buf);
   });
 
   return router;
