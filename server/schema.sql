@@ -75,3 +75,15 @@ ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_base64 TEXT;
 ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_mime TEXT;
 ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_nome TEXT;
 CREATE INDEX IF NOT EXISTS idx_visitas_pago ON visitas(pago);
+
+-- Notificações (sino no topo: nova visita avisa admins; aprovação/reprovação avisa o colaborador)
+CREATE TABLE IF NOT EXISTS notificacoes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  tipo TEXT NOT NULL,
+  visita_id UUID REFERENCES visitas(id) ON DELETE CASCADE,
+  mensagem TEXT NOT NULL,
+  lida BOOLEAN NOT NULL DEFAULT false,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notificacoes_usuario ON notificacoes(usuario_id, lida, criado_em DESC);

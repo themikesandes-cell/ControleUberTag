@@ -26,6 +26,7 @@ async function start() {
   app.use('/api/visitas', visitasRoutes(pool, requireAuth, requireAdmin));
   app.use('/api/despesas', visitasRoutes.comprovanteRouter(pool, requireAuth));
   app.use('/api/visitas', visitasRoutes.pagamentoComprovanteRouter(pool, requireAuth));
+  app.use('/api/notificacoes', require('./routes/notificacoes')(pool, requireAuth));
 
   // Frontend estático
   app.use(express.static(path.join(__dirname, '..', 'public')));
