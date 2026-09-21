@@ -33,7 +33,7 @@ function authMiddleware(pool) {
   return async function (req, res, next) {
     try {
       const header = req.headers.authorization || '';
-      const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+      const token = header.startsWith('Bearer ') ? header.slice(7) : (req.query && req.query.token) || null;
       if (!token) return res.status(401).json({ error: 'Não autenticado.' });
       const payload = verificarToken(token);
       const { rows } = await pool.query('SELECT * FROM usuarios WHERE id = $1', [payload.id]);

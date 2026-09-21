@@ -76,6 +76,10 @@ ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_mime TEXT;
 ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pagamento_comprovante_nome TEXT;
 CREATE INDEX IF NOT EXISTS idx_visitas_pago ON visitas(pago);
 
+-- Foto de perfil (colaborador e admin podem alterar a própria)
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_base64 TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_mime TEXT;
+
 -- Notificações (sino no topo: nova visita avisa admins; aprovação/reprovação avisa o colaborador)
 CREATE TABLE IF NOT EXISTS notificacoes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -87,3 +91,7 @@ CREATE TABLE IF NOT EXISTS notificacoes (
   criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_notificacoes_usuario ON notificacoes(usuario_id, lida, criado_em DESC);
+
+-- Foto de perfil (adicionado depois — ALTER idempotente)
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_base64 TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_mime TEXT;
