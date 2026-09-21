@@ -1455,7 +1455,7 @@ async function pageHome(container){
   var visitas = await D.getMinhasVisitas();
   var mk = U.currentMonthKey();
   var doMes = visitas.filter(function(v){ return U.monthKeyFromISO(v.dataVisita)===mk; });
-  var totalGasto = doMes.reduce(function(s,v){ return s+(v.total||0); }, 0);
+  var totalGasto = doMes.filter(function(v){ return v.status!=='reprovado'; }).reduce(function(s,v){ return s+(v.total||0); }, 0);
   var aguardando = doMes.filter(function(v){ return v.status==='aguardando'; }).length;
   var aprovado = doMes.filter(function(v){ return v.status==='aprovado'; }).length;
   var reprovado = doMes.filter(function(v){ return v.status==='reprovado'; }).length;
@@ -2011,7 +2011,7 @@ async function pageAdminDashboard(container){
   var all = await D.getTodasVisitas();
   var mk = U.currentMonthKey();
   var doMes = all.filter(function(v){ return U.monthKeyFromISO(v.dataVisita)===mk; });
-  var totalGasto = doMes.reduce(function(s,v){ return s+(v.total||0); }, 0);
+  var totalGasto = doMes.filter(function(v){ return v.status!=='reprovado'; }).reduce(function(s,v){ return s+(v.total||0); }, 0);
   var aprovadasMes = doMes.filter(function(v){ return v.status==='aprovado'; }).length;
   var reprovadasMes = doMes.filter(function(v){ return v.status==='reprovado'; }).length;
   var pendentes = all.filter(function(v){ return v.status==='aguardando'; }).sort(function(a,b){ return (a.dataVisita||'').localeCompare(b.dataVisita||''); });
@@ -2512,7 +2512,7 @@ function renderRelatoriosUI(container, all, ctx){
     if(st.status && v.status!==st.status) return false;
     return true;
   });
-  var totalGasto = filtered.reduce(function(s,v){ return s+(v.total||0); }, 0);
+  var totalGasto = filtered.filter(function(v){ return st.status==='reprovado' || v.status!=='reprovado'; }).reduce(function(s,v){ return s+(v.total||0); }, 0);
   var totalIda = 0, totalVolta = 0;
   filtered.forEach(function(v){ (v.despesas||[]).forEach(function(d){ if(d.tipo==='ida') totalIda+=d.valor||0; if(d.tipo==='volta') totalVolta+=d.valor||0; }); });
 
