@@ -25,6 +25,7 @@ async function start() {
   const visitasRoutes = require('./routes/visitas');
   app.use('/api/visitas', visitasRoutes(pool, requireAuth, requireAdmin));
   app.use('/api/despesas', visitasRoutes.comprovanteRouter(pool, requireAuth));
+  app.use('/api/visitas', visitasRoutes.pagamentoComprovanteRouter(pool, requireAuth));
 
   // Frontend estático
   app.use(express.static(path.join(__dirname, '..', 'public')));
