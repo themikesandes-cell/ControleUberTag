@@ -583,7 +583,7 @@ async function boot(){
 }
 function applySession(u){
   State.uid = u.id;
-  State.me = {name:u.nome, avatarUrl:'', color:colorForId(u.id)};
+  State.me = {name:u.nome, avatarUrl:u.temFoto?fotoUrlPara(u.id):'', color:colorForId(u.id)};
   State.role = u.perfil==='admin' ? 'admin' : 'colaborador';
 }
 async function login(email, senha){
@@ -621,6 +621,15 @@ function logout(){
 }
 async function trocarSenha(senhaAtual, novaSenha){
   return POST('/auth/trocar-senha', {senhaAtual:senhaAtual, novaSenha:novaSenha});
+}
+async function salvarFotoPerfil(fotoBase64, fotoMime){
+  await POST('/auth/foto', {fotoBase64:fotoBase64, fotoMime:fotoMime});
+}
+async function removerFotoPerfil(){
+  await api('DELETE', '/auth/foto');
+}
+function fotoUrlPara(userId){
+  return '/api/usuarios/'+userId+'/foto?token='+encodeURIComponent(getToken());
 }
 
 /* ---------------- clientes ---------------- */
@@ -669,7 +678,7 @@ async function updateProjeto(id, patch){
 async function listUsuarios(force){
   if(State.usuariosCache && !force) return State.usuariosCache;
   var rows = await GET('/usuarios');
-  var list = rows.map(function(r){ return {id:r.id, nome:r.nome, email:r.email, cargo:r.cargo, perfil:r.perfil, ativo:r.ativo, criadoEm:r.criadoEm}; });
+  var list = rows.map(function(r){ return {id:r.id, nome:r.nome, email:r.email, cargo:r.cargo, perfil:r.perfil, ativo:r.ativo, criadoEm:r.criadoEm, temFoto:r.temFoto}; });
   State.usuariosCache = list;
   return list;
 }
@@ -689,9 +698,9 @@ async function resetarSenhaUsuario(id){
 }
 
 async function resolveProfiles(ids){
-  var usuarios = State.role==='admin' ? await listUsuarios() : [{id:State.uid, nome:State.me.name}];
+  var usuarios = State.role==='admin' ? await listUsuarios() : [{id:State.uid, nome:State.me.name, temFoto:!!State.me.avatarUrl}];
   var map = {};
-  usuarios.forEach(function(u){ map[u.id] = {id:u.id, name:u.nome, avatarUrl:'', color:colorForId(u.id)}; });
+  usuarios.forEach(function(u){ map[u.id] = {id:u.id, name:u.nome, avatarUrl:u.temFoto?fotoUrlPara(u.id):'', color:colorForId(u.id)}; });
   var out = {};
   (ids||[]).forEach(function(id){ if(id) out[id] = map[id] || {id:id, name:'', avatarUrl:'', color:'#888'}; });
   return out;
@@ -767,6 +776,7 @@ async function fetchComprovanteBlobUrl(url){
 
 window.DATA = {
   boot:boot, login:login, bootstrapAdmin:bootstrapAdmin, logout:logout, trocarSenha:trocarSenha,
+  salvarFotoPerfil:salvarFotoPerfil, removerFotoPerfil:removerFotoPerfil, fotoUrlPara:fotoUrlPara,
   listClientes:listClientes, createCliente:createCliente, updateCliente:updateCliente, deleteCliente:deleteCliente,
   listProjetos:listProjetos, createProjeto:createProjeto, updateProjeto:updateProjeto,
   listUsuarios:listUsuarios, addUsuario:addUsuario, updateUsuario:updateUsuario, resetarSenhaUsuario:resetarSenhaUsuario,
@@ -847,6 +857,7 @@ function openSheet(items){
     closeOverlays();
     if(h==='__logout'){ confirmLogout(); }
     else if(h==='__trocar-senha'){ openTrocarSenhaModal(); }
+    else if(h==='__trocar-foto'){ openTrocarFotoModal(); }
     else { navigate('#/'+h); }
   });
   document.body.appendChild(ov);
@@ -882,6 +893,21 @@ function loadImage(url){
     img.onerror = reject;
     img.src = url;
   });
+}
+async function fileToAvatar(file){
+  var objUrl = URL.createObjectURL(file);
+  var img;
+  try{ img = await loadImage(objUrl); } finally { URL.revokeObjectURL(objUrl); }
+  var size = 320;
+  var side = Math.min(img.width, img.height);
+  var sx = (img.width-side)/2, sy = (img.height-side)/2;
+  var canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size);
+  ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+  var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  return {dataUrl:dataUrl, base64:dataUrl.slice(dataUrl.indexOf(',')+1), type:'image/jpeg'};
 }
 async function fileToAttachment(file){
   var isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name||'');
@@ -996,6 +1022,7 @@ function renderSidebar(activeHash){
   }
   html += '<div class="sidebar-foot"><div class="who">'+avatarHtml(S.me,30)+
     '<div><div class="who-name">'+U.esc(S.me.name||'Você')+'</div><div class="who-role">'+(S.role==='admin'?'Administrador(a)':'Colaborador(a)')+'</div></div></div>'+
+    '<button class="nav-link" data-trocar-foto="1" style="margin-top:2px;">'+U.ICON.edit+'<span>Alterar foto</span></button>'+
     '<button class="nav-link" data-trocar-senha="1" style="margin-top:2px;">'+U.ICON.edit+'<span>Trocar senha</span></button>'+
     '<button class="nav-link" data-logout="1">'+U.ICON.x+'<span>Sair</span></button>'+
     '</div></div>';
@@ -1076,6 +1103,49 @@ function openTrocarSenhaModal(){
         saveBtn.disabled = true;
         try{ await D.trocarSenha(atual, nova); closeOverlays(); toast('Senha alterada.'); }
         catch(e){ toast(e.message||String(e), true); saveBtn.disabled=false; }
+      };
+    }
+  );
+}
+
+function openTrocarFotoModal(){
+  var pendente = null;
+  openModal(
+    '<h3>Foto de perfil</h3>'+
+    '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:6px;">'+
+      '<div id="tf-preview">'+avatarHtml(S.me,96)+'</div>'+
+      '<label class="btn btn-secondary" style="cursor:pointer;">Escolher foto<input type="file" id="tf-file" accept="image/*" style="display:none;"></label>'+
+    '</div>'+
+    '<div class="modal-actions">'+
+      (S.me.avatarUrl?'<button class="btn btn-secondary" data-act="remover" style="margin-right:auto;">Remover foto</button>':'')+
+      '<button class="btn btn-secondary" data-act="cancel">Cancelar</button><button class="btn btn-primary" data-act="save" disabled>Salvar</button>'+
+    '</div>',
+    function(ov){
+      var saveBtn = ov.querySelector('[data-act="save"]');
+      ov.querySelector('[data-act="cancel"]').onclick = closeOverlays;
+      ov.querySelector('#tf-file').onchange = async function(e){
+        var file = e.target.files && e.target.files[0];
+        if(!file) return;
+        try{
+          pendente = await fileToAvatar(file);
+          ov.querySelector('#tf-preview').innerHTML = '<img class="avatar" src="'+pendente.dataUrl+'" width="96" height="96" alt="">';
+          saveBtn.disabled = false;
+        }catch(err){ toast(err.message||String(err), true); }
+      };
+      var removerBtn = ov.querySelector('[data-act="remover"]');
+      if(removerBtn) removerBtn.onclick = async function(){
+        removerBtn.disabled = true;
+        try{ await D.removerFotoPerfil(); S.me.avatarUrl=''; closeOverlays(); toast('Foto removida.'); renderApp(); }
+        catch(err){ toast(err.message||String(err), true); removerBtn.disabled=false; }
+      };
+      saveBtn.onclick = async function(){
+        if(!pendente) return;
+        saveBtn.disabled = true;
+        try{
+          await D.salvarFotoPerfil(pendente.base64, pendente.type);
+          S.me.avatarUrl = D.fotoUrlPara(S.uid)+'&_='+Date.now();
+          closeOverlays(); toast('Foto atualizada.'); renderApp();
+        }catch(err){ toast(err.message||String(err), true); saveBtn.disabled=false; }
       };
     }
   );
@@ -1261,11 +1331,14 @@ async function renderApp(){
   if(moreBtn) moreBtn.onclick = function(){ openSheet(moreSheetItems()); };
   var logoutBtn = root.querySelector('[data-logout]');
   if(logoutBtn) logoutBtn.onclick = confirmLogout;
+  var trocarFotoBtn = root.querySelector('[data-trocar-foto]');
+  if(trocarFotoBtn) trocarFotoBtn.onclick = openTrocarFotoModal;
   var trocarBtn = root.querySelector('[data-trocar-senha]');
   if(trocarBtn) trocarBtn.onclick = openTrocarSenhaModal;
   var accountBtn = root.querySelector('[data-account-menu]');
   if(accountBtn) accountBtn.onclick = function(){
     openSheet([
+      {hash:'__trocar-foto', label:'Alterar foto', icon:'edit'},
       {hash:'__trocar-senha', label:'Trocar senha', icon:'edit'},
       {hash:'__logout', label:'Sair', icon:'x'}
     ]);
@@ -2302,7 +2375,7 @@ function renderUsuariosUI(container, usuarios){
       '<div class="table-wrap"><table class="data-table"><thead><tr><th>Nome</th><th>E-mail</th><th>Cargo</th><th>Perfil</th><th>Status</th><th></th></tr></thead><tbody>'+
       usuarios.map(function(u){
         var isMe = u.id===S.uid;
-        return '<tr><td><div style="display:flex;align-items:center;gap:9px;">'+SH.avatarHtml({name:u.nome},24)+'<span>'+esc(u.nome)+(isMe?' <span class="text-faint">(você)</span>':'')+'</span></div></td>'+
+        return '<tr><td><div style="display:flex;align-items:center;gap:9px;">'+SH.avatarHtml({name:u.nome, avatarUrl:u.temFoto?D.fotoUrlPara(u.id):''},24)+'<span>'+esc(u.nome)+(isMe?' <span class="text-faint">(você)</span>':'')+'</span></div></td>'+
           '<td>'+esc(u.email||'—')+'</td>'+
           '<td>'+esc(u.cargo||'—')+'</td>'+
           '<td>'+(u.perfil==='admin'?'Administrador(a)':'Colaborador(a)')+'</td>'+
