@@ -12,18 +12,23 @@ module.exports = function (pool, requireAuth, requireAdmin) {
       observacao: v.observacao, status: v.status, motivoReprovacao: v.motivo_reprovacao,
       total: Number(v.total) || 0,
       criadoEm: v.criado_em, enviadoEm: v.enviado_em, aprovadoEm: v.aprovado_em,
-      aprovadoPor: v.aprovado_por, aprovadoPorNome: v.aprovado_por_nome
+      aprovadoPor: v.aprovado_por, aprovadoPorNome: v.aprovado_por_nome,
+      pago: !!v.pago, pagoEm: v.pago_em, pagoPor: v.pago_por, pagoPorNome: v.pago_por_nome,
+      pagamentoComprovanteNome: v.pagamento_comprovante_nome,
+      pagamentoComprovanteUrl: v.pagamento_comprovante_mime ? `/api/visitas/${v.id}/pagamento-comprovante` : null,
+      pagamentoComprovanteTipo: v.pagamento_comprovante_mime
     };
   }
 
   const LIST_SELECT = `
     SELECT v.*, u.nome AS colaborador_nome, c.nome AS cliente_nome, p.nome AS projeto_nome,
-           a.nome AS aprovado_por_nome
+           a.nome AS aprovado_por_nome, pg.nome AS pago_por_nome
     FROM visitas v
     LEFT JOIN usuarios u ON u.id = v.colaborador_id
     LEFT JOIN clientes c ON c.id = v.cliente_id
     LEFT JOIN projetos p ON p.id = v.projeto_id
     LEFT JOIN usuarios a ON a.id = v.aprovado_por
+    LEFT JOIN usuarios pg ON pg.id = v.pago_por
   `;
 
   router.get('/minhas', requireAuth, async (req, res) => {
@@ -160,6 +165,33 @@ module.exports = function (pool, requireAuth, requireAdmin) {
     res.json({ ok: true });
   });
 
+  router.post('/:id/pagamento', requireAuth, requireAdmin, async (req, res) => {
+    const p = req.body || {};
+    const existing = await pool.query('SELECT status FROM visitas WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Prestação não encontrada.' });
+    if (existing.rows[0].status !== 'aprovado') {
+      return res.status(400).json({ error: 'Só é possível controlar pagamento de prestações já aprovadas.' });
+    }
+    if (p.pago === false) {
+      await pool.query(
+        `UPDATE visitas SET pago=false, pago_em=NULL, pago_por=NULL WHERE id=$1`,
+        [req.params.id]
+      );
+      return res.json({ ok: true });
+    }
+    const sets = ['pago = true', 'pago_em = now()', 'pago_por = $1'];
+    const values = [req.user.id];
+    if (p.comprovanteBase64) {
+      values.push(p.comprovanteBase64); sets.push(`pagamento_comprovante_base64 = $${values.length}`);
+      values.push(p.comprovanteMime || null); sets.push(`pagamento_comprovante_mime = $${values.length}`);
+      values.push(p.comprovanteNome || null); sets.push(`pagamento_comprovante_nome = $${values.length}`);
+    }
+    values.push(req.params.id);
+    const { rows } = await pool.query(`UPDATE visitas SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING id`, values);
+    if (!rows.length) return res.status(404).json({ error: 'Prestação não encontrada.' });
+    res.json({ ok: true });
+  });
+
   return router;
 };
 
@@ -178,6 +210,27 @@ module.exports.comprovanteRouter = function (pool, requireAuth) {
     }
     const buf = Buffer.from(d.comprovante_base64, 'base64');
     res.setHeader('Content-Type', d.comprovante_mime || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(buf);
+  });
+  return router;
+};
+
+// Rota separada (montada em /api/visitas) para servir o comprovante de pagamento.
+module.exports.pagamentoComprovanteRouter = function (pool, requireAuth) {
+  const router = express.Router();
+  router.get('/:id/pagamento-comprovante', requireAuth, async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT id, colaborador_id, pagamento_comprovante_base64, pagamento_comprovante_mime FROM visitas WHERE id = $1`,
+      [req.params.id]
+    );
+    const v = rows[0];
+    if (!v || !v.pagamento_comprovante_base64) return res.status(404).send('Não encontrado.');
+    if (req.user.perfil !== 'admin' && v.colaborador_id !== req.user.id) {
+      return res.status(403).send('Sem acesso.');
+    }
+    const buf = Buffer.from(v.pagamento_comprovante_base64, 'base64');
+    res.setHeader('Content-Type', v.pagamento_comprovante_mime || 'application/octet-stream');
     res.setHeader('Cache-Control', 'private, max-age=86400');
     res.send(buf);
   });
